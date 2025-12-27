@@ -1,11 +1,18 @@
 namespace CppSbom;
 
+internal enum OutputFormat
+{
+    Spdx,
+    CycloneDx
+}
+
 internal sealed record CommandLineOptions
 {
     public string RootDirectory { get; init; } = Directory.GetCurrentDirectory();
     public IReadOnlyList<string> ThirdPartyDirectories { get; init; } = Array.Empty<string>();
     public string OutputPath { get; init; } = Path.Combine(Directory.GetCurrentDirectory(), "sbom-report.json");
     public string LogPath { get; init; } = Path.Combine(Directory.GetCurrentDirectory(), "cppsbom.log");
+    public OutputFormat Format { get; init; } = OutputFormat.Spdx;
 
     public static CommandLineOptions Parse(string[] args)
     {
@@ -19,6 +26,7 @@ internal sealed record CommandLineOptions
         var thirdParty = new List<string>();
         var output = (string?)null;
         var log = (string?)null;
+        var format = OutputFormat.Spdx;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -35,6 +43,9 @@ internal sealed record CommandLineOptions
                 case "--output":
                 case "-o":
                     output = RequireValue(args, ref i);
+                    break;
+                case "--format":
+                    format = ParseFormat(RequireValue(args, ref i));
                     break;
                 case "--log":
                     log = RequireValue(args, ref i);
@@ -64,7 +75,8 @@ internal sealed record CommandLineOptions
             RootDirectory = root,
             ThirdPartyDirectories = normalizedThirdParty,
             OutputPath = outputPath,
-            LogPath = logPath
+            LogPath = logPath,
+            Format = format
         };
     }
 
@@ -81,7 +93,22 @@ internal sealed record CommandLineOptions
 
     private static void PrintUsage()
     {
-        const string text = "Usage: cppsbom [--root <path>] [--third-party <path>]... [--output <file>] [--log <file>]";
+        const string text = "Usage: cppsbom [--root <path>] [--third-party <path>]... [--output <file>] [--log <file>] [--format spdx|cyclonedx]";
         Console.WriteLine(text);
+    }
+
+    private static OutputFormat ParseFormat(string value)
+    {
+        if (string.Equals(value, "spdx", StringComparison.OrdinalIgnoreCase))
+        {
+            return OutputFormat.Spdx;
+        }
+
+        if (string.Equals(value, "cyclonedx", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "cdx", StringComparison.OrdinalIgnoreCase))
+        {
+            return OutputFormat.CycloneDx;
+        }
+
+        throw new ArgumentException($"Unknown format '{value}'. Expected 'spdx' or 'cyclonedx'.");
     }
 }
