@@ -9,6 +9,21 @@ internal sealed class SourceScanner
     private static readonly Regex PragmaLibRegex = new(@"#\s*pragma\s+comment\s*\(\s*lib\s*,\s*""(?<lib>[^""]+)""\s*\)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex GuidRegex = new(@"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}", RegexOptions.Compiled);
     private static readonly Regex StringLiteralRegex = new(@"(?:(?:L|u|U|u8)?""(?<value>[^""\\\n]{3,})"")", RegexOptions.Compiled);
+    private static readonly HashSet<string> DisallowedProgIdExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx",
+        ".inc",
+        ".idl",
+        ".tlb",
+        ".tlh",
+        ".tli",
+        ".def",
+        ".rc",
+        ".manifest"
+    };
 
     public SourceScanResult Scan(IEnumerable<string> files)
     {
@@ -72,6 +87,11 @@ internal sealed class SourceScanner
     {
         foreach (Match match in StringLiteralRegex.Matches(text))
         {
+            if (IsInPreprocessorDirective(text, match))
+            {
+                continue;
+            }
+
             var value = match.Groups["value"].Value.Trim();
             if (LooksLikeProgId(value))
             {
@@ -91,6 +111,12 @@ internal sealed class SourceScanner
     private static bool LooksLikeProgId(string candidate)
     {
         if (!candidate.Contains('.') || candidate.Contains(' ') || candidate.Contains("::") || candidate.Contains('/'))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(candidate);
+        if (!string.IsNullOrEmpty(extension) && DisallowedProgIdExtensions.Contains(extension))
         {
             return false;
         }
@@ -118,6 +144,25 @@ internal sealed class SourceScanner
         }
 
         return char.IsLetter(candidate[0]);
+    }
+
+    private static bool IsInPreprocessorDirective(string text, Match match)
+    {
+        var lineStart = text.LastIndexOf('\n', match.Index);
+        lineStart = lineStart == -1 ? 0 : lineStart + 1;
+        var lineEnd = text.IndexOf('\n', match.Index);
+        lineEnd = lineEnd == -1 ? text.Length : lineEnd;
+
+        var line = text.Substring(lineStart, lineEnd - lineStart).TrimStart();
+        if (!line.StartsWith('#'))
+        {
+            return false;
+        }
+
+        line = line.Substring(1).TrimStart();
+        return line.StartsWith("include", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("import", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("pragma", StringComparison.OrdinalIgnoreCase);
     }
 }
 

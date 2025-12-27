@@ -168,10 +168,6 @@ internal sealed class ProjectAnalyzer
             var metadata = _comResolver.ResolveFromProgId(progId.Value);
             if (metadata is null)
             {
-                dependencies.Add(new Dependency(progId.Value, DependencyType.Com)
-                {
-                    SourcePath = progId.FilePath
-                });
                 continue;
             }
 
@@ -183,10 +179,6 @@ internal sealed class ProjectAnalyzer
             var metadata = _comResolver.ResolveFromClsid(clsid.Value);
             if (metadata is null)
             {
-                dependencies.Add(new Dependency(clsid.Value, DependencyType.Com)
-                {
-                    SourcePath = clsid.FilePath
-                });
                 continue;
             }
 

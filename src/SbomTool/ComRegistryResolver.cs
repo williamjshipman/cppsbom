@@ -25,30 +25,40 @@ internal sealed class ComRegistryResolver : IComResolver
     {
         foreach (var view in Views)
         {
-            using var baseKey = OpenClassesRoot(view);
-            using var progKey = baseKey?.OpenSubKey(progId);
-            if (progKey is null)
+            try
             {
-                continue;
-            }
-
-            var description = progKey.GetValue(null) as string;
-            var clsid = progKey.GetValue("CLSID") as string;
-            if (string.IsNullOrWhiteSpace(clsid))
-            {
-                return new ComMetadata
+                using var baseKey = OpenClassesRoot(view);
+                using var progKey = baseKey?.OpenSubKey(progId);
+                if (progKey is null)
                 {
-                    ProgId = progId,
-                    Description = description,
-                    RegistryView = view.ToString()
-                };
-            }
+                    continue;
+                }
 
-            var metadata = ResolveFromClsid(clsid, view) ?? new ComMetadata();
-            metadata.ProgId ??= progId;
-            metadata.Description ??= description;
-            metadata.RegistryView = view.ToString();
-            return metadata;
+                var description = progKey.GetValue(null) as string;
+                var clsid = progKey.GetValue("CLSID") as string;
+                if (string.IsNullOrWhiteSpace(clsid))
+                {
+                    return new ComMetadata
+                    {
+                        ProgId = progId,
+                        Description = description,
+                        RegistryView = view.ToString()
+                    };
+                }
+
+                var metadata = ResolveFromClsid(clsid, view) ?? new ComMetadata();
+                if (metadata is not null)
+                {
+                    metadata.ProgId ??= progId;
+                    metadata.Description ??= description;
+                    metadata.RegistryView = view.ToString();
+                }
+                return metadata;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning(ex, "Error resolving ProgID {ProgId} in {RegistryView}", progId, view);
+            }
         }
 
         _logger.Debug("ProgID {ProgId} not found in COM registry", progId);
@@ -72,30 +82,38 @@ internal sealed class ComRegistryResolver : IComResolver
 
     private ComMetadata? ResolveFromClsid(string clsid, RegistryView view)
     {
-        var normalized = NormalizeClsid(clsid);
-        using var baseKey = OpenClassesRoot(view);
-        using var clsidKey = baseKey?.OpenSubKey($"CLSID\\{normalized}");
-        if (clsidKey is null)
+        try
         {
+            var normalized = NormalizeClsid(clsid);
+            using var baseKey = OpenClassesRoot(view);
+            using var clsidKey = baseKey?.OpenSubKey($"CLSID\\{normalized}");
+            if (clsidKey is null)
+            {
+                return null;
+            }
+
+            var description = clsidKey.GetValue(null) as string;
+            using var inproc = clsidKey.OpenSubKey("InprocServer32");
+            var serverPath = inproc?.GetValue(null) as string;
+            var threading = inproc?.GetValue("ThreadingModel") as string;
+            using var progIdKey = clsidKey.OpenSubKey("ProgID");
+            var progId = progIdKey?.GetValue(null) as string;
+
+            return new ComMetadata
+            {
+                Clsid = normalized,
+                Description = description,
+                InprocServer = serverPath,
+                ThreadingModel = threading,
+                ProgId = progId,
+                RegistryView = view.ToString()
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.Warning(ex, "Error resolving CLSID {Clsid} in {RegistryView}", clsid, view);
             return null;
         }
-
-        var description = clsidKey.GetValue(null) as string;
-        using var inproc = clsidKey.OpenSubKey("InprocServer32");
-        var serverPath = inproc?.GetValue(null) as string;
-        var threading = inproc?.GetValue("ThreadingModel") as string;
-        using var progIdKey = clsidKey.OpenSubKey("ProgID");
-        var progId = progIdKey?.GetValue(null) as string;
-
-        return new ComMetadata
-        {
-            Clsid = normalized,
-            Description = description,
-            InprocServer = serverPath,
-            ThreadingModel = threading,
-            ProgId = progId,
-            RegistryView = view.ToString()
-        };
     }
 
     private static string NormalizeClsid(string clsid)

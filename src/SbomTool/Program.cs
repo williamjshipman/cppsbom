@@ -11,6 +11,7 @@ internal static class Program
         try
         {
             Log.Information("cppsbom starting in {Root}", options.RootDirectory);
+            RegisterCodePagesEncodingProvider();
             var generator = new SbomGenerator(options, Log.Logger);
             generator.Run();
             Log.Information("cppsbom completed successfully");
@@ -41,5 +42,22 @@ internal static class Program
             .WriteTo.Console()
             .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 7)
             .CreateLogger();
+    }
+
+    /// <summary>
+    /// Registers the code pages encoding provider to support non-standard XML
+    /// encodings like Windows-1252 used in some vcxproj files.
+    /// </summary>
+    private static void RegisterCodePagesEncodingProvider()
+    {
+        Log.Information("Registering code pages encoding provider for non-standard XML encodings.");
+        try
+        {
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to register code pages encoding provider.");
+        }
     }
 }
