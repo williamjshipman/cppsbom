@@ -93,7 +93,11 @@ internal sealed record CommandLineOptions
 
     private static void PrintUsage()
     {
-        const string text = "Usage: cppsbom [--root <path>] [--third-party <path>]... [--output <file>] [--log <file>] [--format spdx|cyclonedx]";
+        const string text = """
+Usage: cppsbom [--root <path>] [--third-party <path>]... [--output <file>] [--log <file>] [--format spdx|cyclonedx]
+
+  --format spdx|cyclonedx   Output format (default: spdx)
+""";
         Console.WriteLine(text);
     }
 

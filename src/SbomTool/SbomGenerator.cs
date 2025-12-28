@@ -67,7 +67,7 @@ internal sealed class SbomGenerator
                     var summaryKey = (dependency.Identifier, dependency.Type);
                     if (!dependencySummaries.TryGetValue(summaryKey, out var summary))
                     {
-                        summary = new DependencySummary(dependency.Identifier, dependency.Type.ToString())
+                        summary = new DependencySummary(dependency.Identifier, dependency.Type)
                         {
                             Description = dependency.Description
                         };
@@ -98,18 +98,24 @@ internal sealed class SbomGenerator
             }
         }
 
-        var projectReports = projectDependencyMap
-            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(kvp => new ProjectReport(kvp.Key, kvp.Value.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList()))
-            .ToList();
-
-        var dependencies = dependencySummaries.Values
+        var dependencyList = dependencySummaries.Values
             .OrderBy(d => d.Identifier, StringComparer.OrdinalIgnoreCase)
             .ThenBy(d => d.Type)
             .ToList();
 
-        var report = new SbomReport(DateTime.UtcNow, projectReports, dependencies);
-        _writer.Write(report, _options.OutputPath);
+        var generatedAt = DateTime.UtcNow;
+        switch (_options.Format)
+        {
+            case OutputFormat.CycloneDx:
+                var cyclonedx = BuildCycloneDxBom(projectDependencyMap, dependencyList, generatedAt);
+                _writer.Write(cyclonedx, _options.OutputPath);
+                break;
+            case OutputFormat.Spdx:
+            default:
+                var spdx = BuildSpdxDocument(projectDependencyMap, dependencyList, generatedAt);
+                _writer.Write(spdx, _options.OutputPath);
+                break;
+        }
     }
 
     private string Relativize(string? path)
@@ -136,5 +142,214 @@ internal sealed class SbomGenerator
         }
 
         return Relativize(path);
+    }
+
+    private SpdxDocument BuildSpdxDocument(
+        Dictionary<string, HashSet<string>> projectDependencyMap,
+        List<DependencySummary> dependencies,
+        DateTime generatedAt)
+    {
+        var spdxIdMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var usedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var packages = new List<SpdxPackage>();
+        var relationships = new List<SpdxRelationship>();
+
+        foreach (var project in projectDependencyMap.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+        {
+            var spdxId = EnsureSpdxId($"Project-{project}", spdxIdMap, usedIds);
+            packages.Add(new SpdxPackage(project, spdxId, "NOASSERTION", false, "NOASSERTION", "NOASSERTION", "NOASSERTION"));
+            relationships.Add(new SpdxRelationship("SPDXRef-DOCUMENT", spdxId, "DESCRIBES"));
+        }
+
+        foreach (var dependency in dependencies)
+        {
+            var key = $"{dependency.Type}:{dependency.Identifier}";
+            var spdxId = EnsureSpdxId($"Dependency-{key}", spdxIdMap, usedIds);
+            var package = new SpdxPackage(dependency.Identifier, spdxId, "NOASSERTION", false, "NOASSERTION", "NOASSERTION", "NOASSERTION")
+            {
+                Description = dependency.Description
+            };
+            packages.Add(package);
+        }
+
+        foreach (var (project, depKeys) in projectDependencyMap)
+        {
+            var projectId = spdxIdMap[$"Project-{project}"];
+            foreach (var depKey in depKeys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+            {
+                var dependencyId = spdxIdMap[$"Dependency-{depKey}"];
+                relationships.Add(new SpdxRelationship(projectId, dependencyId, "DEPENDS_ON"));
+            }
+        }
+
+        var namespaceId = Guid.NewGuid().ToString("D");
+        var creationInfo = new SpdxCreationInfo(new[] { "Tool: cppsbom" }, generatedAt);
+        return new SpdxDocument(
+            "SPDX-2.3",
+            "CC0-1.0",
+            "SPDXRef-DOCUMENT",
+            "cppsbom",
+            $"https://spdx.org/spdxdocs/cppsbom-{namespaceId}",
+            creationInfo,
+            packages,
+            relationships);
+    }
+
+    private CycloneDxBom BuildCycloneDxBom(
+        Dictionary<string, HashSet<string>> projectDependencyMap,
+        List<DependencySummary> dependencies,
+        DateTime generatedAt)
+    {
+        var refMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var usedRefs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var components = new List<CycloneDxComponent>();
+        foreach (var project in projectDependencyMap.Keys)
+        {
+            var reference = EnsureCycloneDxRef($"project:{project}", refMap, usedRefs, "project", project);
+            var component = new CycloneDxComponent("application", project)
+            {
+                BomRef = reference
+            };
+            components.Add(component);
+        }
+
+        foreach (var dependency in dependencies)
+        {
+            var reference = EnsureCycloneDxRef($"dependency:{dependency.Type}:{dependency.Identifier}", refMap, usedRefs, dependency.Type.ToString(), dependency.Identifier);
+            var component = new CycloneDxComponent(MapCycloneDxType(dependency.Type), dependency.Identifier)
+            {
+                BomRef = reference,
+                Description = dependency.Description,
+                Properties = BuildCycloneDxProperties(dependency)
+            };
+            components.Add(component);
+        }
+
+        var dependencyGraph = new List<CycloneDxDependency>();
+        foreach (var (project, depKeys) in projectDependencyMap)
+        {
+            var projectRef = refMap[$"project:{project}"];
+            var dependsOn = depKeys
+                .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                .Select(k => refMap.TryGetValue($"dependency:{k}", out var depRef) ? depRef : null)
+                .Where(depRef => !string.IsNullOrWhiteSpace(depRef))
+                .Select(depRef => depRef!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            dependencyGraph.Add(new CycloneDxDependency(projectRef, dependsOn));
+        }
+
+        var metadata = new CycloneDxMetadata(generatedAt)
+        {
+            Tools = new CycloneDxTools(new[]
+            {
+                new CycloneDxComponent("application", "cppsbom")
+            })
+        };
+
+        return new CycloneDxBom("CycloneDX", "1.5", 1)
+        {
+            Metadata = metadata,
+            Components = components
+                .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            Dependencies = dependencyGraph
+        };
+    }
+
+    private static string EnsureSpdxId(string key, Dictionary<string, string> existing, HashSet<string> used)
+    {
+        if (existing.TryGetValue(key, out var current))
+        {
+            return current;
+        }
+
+        var normalized = new string(key.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray()).Trim('-');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = "Item";
+        }
+
+        var baseId = $"SPDXRef-{normalized}";
+        var candidate = baseId;
+        var index = 1;
+        while (!used.Add(candidate))
+        {
+            candidate = $"{baseId}-{index}";
+            index++;
+        }
+
+        existing[key] = candidate;
+        return candidate;
+    }
+
+    private static string MapCycloneDxType(DependencyType type) =>
+        type switch
+        {
+            DependencyType.HeaderInclude => "file",
+            DependencyType.ImportDirective => "file",
+            DependencyType.StaticLibrary => "library",
+            DependencyType.Com => "library",
+            _ => "library"
+        };
+
+    private static string BuildCycloneDxRef(string prefix, string value)
+    {
+        var normalized = new string(value.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray()).Trim('-');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = "item";
+        }
+        return $"{prefix}-{normalized}";
+    }
+
+    private static string EnsureCycloneDxRef(
+        string key,
+        Dictionary<string, string> existing,
+        HashSet<string> used,
+        string prefix,
+        string value)
+    {
+        if (existing.TryGetValue(key, out var current))
+        {
+            return current;
+        }
+
+        var baseRef = BuildCycloneDxRef(prefix, value);
+        var candidate = baseRef;
+        var index = 1;
+        while (!used.Add(candidate))
+        {
+            candidate = $"{baseRef}-{index}";
+            index++;
+        }
+
+        existing[key] = candidate;
+        return candidate;
+    }
+
+    private static IReadOnlyList<CycloneDxProperty>? BuildCycloneDxProperties(DependencySummary dependency)
+    {
+        var properties = new List<CycloneDxProperty>
+        {
+            new("cppsbom:dependencyType", dependency.Type.ToString())
+        };
+
+        if (dependency.SourcePaths.Count > 0)
+        {
+            properties.Add(new CycloneDxProperty("cppsbom:sourcePaths", string.Join(";", dependency.SourcePaths)));
+        }
+
+        if (dependency.ResolvedPaths.Count > 0)
+        {
+            properties.Add(new CycloneDxProperty("cppsbom:resolvedPaths", string.Join(";", dependency.ResolvedPaths)));
+        }
+
+        if (dependency.Metadata.Count > 0)
+        {
+            properties.Add(new CycloneDxProperty("cppsbom:metadata", string.Join(";", dependency.Metadata)));
+        }
+
+        return properties.Count == 0 ? null : properties;
     }
 }
