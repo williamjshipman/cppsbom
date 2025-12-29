@@ -6,6 +6,12 @@ internal enum OutputFormat
     CycloneDx
 }
 
+internal enum ScanType
+{
+    VisualStudio,
+    CMake
+}
+
 internal sealed record CommandLineOptions
 {
     public string RootDirectory { get; init; } = Directory.GetCurrentDirectory();
@@ -13,6 +19,7 @@ internal sealed record CommandLineOptions
     public string OutputPath { get; init; } = Path.Combine(Directory.GetCurrentDirectory(), "sbom-report.json");
     public string LogPath { get; init; } = Path.Combine(Directory.GetCurrentDirectory(), "cppsbom.log");
     public OutputFormat Format { get; init; } = OutputFormat.Spdx;
+    public ScanType Type { get; init; } = ScanType.VisualStudio;
 
     public static CommandLineOptions Parse(string[] args)
     {
@@ -27,6 +34,7 @@ internal sealed record CommandLineOptions
         var output = (string?)null;
         var log = (string?)null;
         var format = OutputFormat.Spdx;
+        var scanType = ScanType.VisualStudio;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -46,6 +54,9 @@ internal sealed record CommandLineOptions
                     break;
                 case "--format":
                     format = ParseFormat(RequireValue(args, ref i));
+                    break;
+                case "--type":
+                    scanType = ParseScanType(RequireValue(args, ref i));
                     break;
                 case "--log":
                     log = RequireValue(args, ref i);
@@ -76,7 +87,8 @@ internal sealed record CommandLineOptions
             ThirdPartyDirectories = normalizedThirdParty,
             OutputPath = outputPath,
             LogPath = logPath,
-            Format = format
+            Format = format,
+            Type = scanType
         };
     }
 
@@ -94,9 +106,10 @@ internal sealed record CommandLineOptions
     private static void PrintUsage()
     {
         const string text = """
-Usage: cppsbom [--root <path>] [--third-party <path>]... [--output <file>] [--log <file>] [--format spdx|cyclonedx]
+Usage: cppsbom [--root <path>] [--third-party <path>]... [--output <file>] [--log <file>] [--format spdx|cyclonedx] [--type cmake|vs|visualstudio]
 
   --format spdx|cyclonedx   Output format (default: spdx)
+  --type cmake|vs|visualstudio  Scan mode (default: visualstudio)
 """;
         Console.WriteLine(text);
     }
@@ -114,5 +127,21 @@ Usage: cppsbom [--root <path>] [--third-party <path>]... [--output <file>] [--lo
         }
 
         throw new ArgumentException($"Unknown format '{value}'. Expected 'spdx' or 'cyclonedx'.");
+    }
+
+    private static ScanType ParseScanType(string value)
+    {
+        if (string.Equals(value, "vs", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "visualstudio", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScanType.VisualStudio;
+        }
+
+        if (string.Equals(value, "cmake", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScanType.CMake;
+        }
+
+        throw new ArgumentException($"Unknown scan type '{value}'. Expected 'cmake', 'vs', or 'visualstudio'.");
     }
 }

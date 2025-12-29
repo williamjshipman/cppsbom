@@ -8,6 +8,7 @@ internal sealed class SbomGenerator
     private readonly ILogger _logger;
     private readonly SolutionScanner _solutionScanner;
     private readonly ProjectAnalyzer _projectAnalyzer;
+    private readonly IComResolver _comResolver;
     private readonly SbomWriter _writer;
 
     public SbomGenerator(CommandLineOptions options, ILogger logger)
@@ -25,12 +26,51 @@ internal sealed class SbomGenerator
             _logger.Warning("COM registry interrogation skipped: unsupported on current OS");
             comResolver = new NullComResolver(logger);
         }
+        _comResolver = comResolver;
         _solutionScanner = new SolutionScanner(logger);
         _projectAnalyzer = new ProjectAnalyzer(options, logger, sourceScanner, comResolver);
         _writer = new SbomWriter(logger);
     }
 
     public void Run()
+    {
+        var projectDependencyMap = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var dependencySummaries = new Dictionary<(string Id, DependencyType Type), DependencySummary>();
+
+        switch (_options.Type)
+        {
+            case ScanType.CMake:
+                RunCMakeScan(projectDependencyMap, dependencySummaries);
+                break;
+            case ScanType.VisualStudio:
+            default:
+                RunVisualStudioScan(projectDependencyMap, dependencySummaries);
+                break;
+        }
+
+        var dependencyList = dependencySummaries.Values
+            .OrderBy(d => d.Identifier, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(d => d.Type)
+            .ToList();
+
+        var generatedAt = DateTime.UtcNow;
+        switch (_options.Format)
+        {
+            case OutputFormat.CycloneDx:
+                var cyclonedx = BuildCycloneDxBom(projectDependencyMap, dependencyList, generatedAt);
+                _writer.Write(cyclonedx, _options.OutputPath);
+                break;
+            case OutputFormat.Spdx:
+            default:
+                var spdx = BuildSpdxDocument(projectDependencyMap, dependencyList, generatedAt);
+                _writer.Write(spdx, _options.OutputPath);
+                break;
+        }
+    }
+
+    private void RunVisualStudioScan(
+        Dictionary<string, HashSet<string>> projectDependencyMap,
+        Dictionary<(string Id, DependencyType Type), DependencySummary> dependencySummaries)
     {
         var solutions = _solutionScanner.FindSolutions(_options.RootDirectory).ToList();
         if (solutions.Count == 0)
@@ -39,8 +79,6 @@ internal sealed class SbomGenerator
         }
 
         var analysisCache = new Dictionary<string, ProjectAnalysis>(StringComparer.OrdinalIgnoreCase);
-        var projectDependencyMap = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        var dependencySummaries = new Dictionary<(string Id, DependencyType Type), DependencySummary>();
 
         foreach (var solutionPath in solutions)
         {
@@ -61,60 +99,73 @@ internal sealed class SbomGenerator
                     projectDependencyMap[projectKey] = dependencySet;
                 }
 
-                foreach (var dependency in analysis.Dependencies)
-                {
-                    dependencySet.Add($"{dependency.Type}:{dependency.Identifier}");
-                    var summaryKey = (dependency.Identifier, dependency.Type);
-                    if (!dependencySummaries.TryGetValue(summaryKey, out var summary))
-                    {
-                        summary = new DependencySummary(dependency.Identifier, dependency.Type)
-                        {
-                            Description = dependency.Description
-                        };
-                        dependencySummaries.Add(summaryKey, summary);
-                    }
-
-                    if (summary.Description is null && dependency.Description is not null)
-                    {
-                        summary.Description = dependency.Description;
-                    }
-
-                    summary.Projects.Add(projectKey);
-                    if (!string.IsNullOrWhiteSpace(dependency.SourcePath))
-                    {
-                        summary.SourcePaths.Add(Relativize(dependency.SourcePath));
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(dependency.ResolvedPath))
-                    {
-                        summary.ResolvedPaths.Add(RelativizeOrAbsolute(dependency.ResolvedPath));
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(dependency.Metadata))
-                    {
-                        summary.Metadata.Add(dependency.Metadata);
-                    }
-                }
+                AddDependencies(projectKey, analysis.Dependencies, dependencySet, dependencySummaries);
             }
         }
+    }
 
-        var dependencyList = dependencySummaries.Values
-            .OrderBy(d => d.Identifier, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(d => d.Type)
-            .ToList();
+    private void RunCMakeScan(
+        Dictionary<string, HashSet<string>> projectDependencyMap,
+        Dictionary<(string Id, DependencyType Type), DependencySummary> dependencySummaries)
+    {
+        _logger.Information("Scanning CMakeLists.txt under {Root}", _options.RootDirectory);
+        var cmakeScanner = new CMakeScanner(_logger);
+        var graph = cmakeScanner.Scan(_options.RootDirectory);
+        var analyzer = new CMakeTargetAnalyzer(_options, _logger, new SourceScanner(), _comResolver, graph);
 
-        var generatedAt = DateTime.UtcNow;
-        switch (_options.Format)
+        foreach (var target in graph.TargetsById.Values.OrderBy(t => t.Identifier, StringComparer.OrdinalIgnoreCase))
         {
-            case OutputFormat.CycloneDx:
-                var cyclonedx = BuildCycloneDxBom(projectDependencyMap, dependencyList, generatedAt);
-                _writer.Write(cyclonedx, _options.OutputPath);
-                break;
-            case OutputFormat.Spdx:
-            default:
-                var spdx = BuildSpdxDocument(projectDependencyMap, dependencyList, generatedAt);
-                _writer.Write(spdx, _options.OutputPath);
-                break;
+            var dependencies = analyzer.Analyze(target);
+            var projectKey = target.Identifier;
+            if (!projectDependencyMap.TryGetValue(projectKey, out var dependencySet))
+            {
+                dependencySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                projectDependencyMap[projectKey] = dependencySet;
+            }
+
+            AddDependencies(projectKey, dependencies, dependencySet, dependencySummaries);
+        }
+    }
+
+    private void AddDependencies(
+        string projectKey,
+        IEnumerable<Dependency> dependencies,
+        HashSet<string> dependencySet,
+        Dictionary<(string Id, DependencyType Type), DependencySummary> dependencySummaries)
+    {
+        foreach (var dependency in dependencies)
+        {
+            dependencySet.Add($"{dependency.Type}:{dependency.Identifier}");
+            var summaryKey = (dependency.Identifier, dependency.Type);
+            if (!dependencySummaries.TryGetValue(summaryKey, out var summary))
+            {
+                summary = new DependencySummary(dependency.Identifier, dependency.Type)
+                {
+                    Description = dependency.Description
+                };
+                dependencySummaries.Add(summaryKey, summary);
+            }
+
+            if (summary.Description is null && dependency.Description is not null)
+            {
+                summary.Description = dependency.Description;
+            }
+
+            summary.Projects.Add(projectKey);
+            if (!string.IsNullOrWhiteSpace(dependency.SourcePath))
+            {
+                summary.SourcePaths.Add(Relativize(dependency.SourcePath));
+            }
+
+            if (!string.IsNullOrWhiteSpace(dependency.ResolvedPath))
+            {
+                summary.ResolvedPaths.Add(RelativizeOrAbsolute(dependency.ResolvedPath));
+            }
+
+            if (!string.IsNullOrWhiteSpace(dependency.Metadata))
+            {
+                summary.Metadata.Add(dependency.Metadata);
+            }
         }
     }
 
