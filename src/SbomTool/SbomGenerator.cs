@@ -2,15 +2,41 @@ using Serilog;
 
 namespace CppSbom;
 
+/// <summary>
+/// Orchestrates scanning and SBOM generation for supported project types.
+/// </summary>
 internal sealed class SbomGenerator
 {
+    /// <summary>
+    /// Parsed command line options for the run.
+    /// </summary>
     private readonly CommandLineOptions _options;
+    /// <summary>
+    /// Logger used for workflow diagnostics.
+    /// </summary>
     private readonly ILogger _logger;
+    /// <summary>
+    /// Scanner for Visual Studio solution discovery.
+    /// </summary>
     private readonly SolutionScanner _solutionScanner;
+    /// <summary>
+    /// Analyzer for Visual Studio projects.
+    /// </summary>
     private readonly ProjectAnalyzer _projectAnalyzer;
+    /// <summary>
+    /// Resolver for COM registry metadata.
+    /// </summary>
     private readonly IComResolver _comResolver;
+    /// <summary>
+    /// Writer for serialized SBOM outputs.
+    /// </summary>
     private readonly SbomWriter _writer;
 
+    /// <summary>
+    /// Initializes the generator with options and logging.
+    /// </summary>
+    /// <param name="options">Parsed command line options.</param>
+    /// <param name="logger">Logger for diagnostics.</param>
     public SbomGenerator(CommandLineOptions options, ILogger logger)
     {
         _options = options;
@@ -32,6 +58,9 @@ internal sealed class SbomGenerator
         _writer = new SbomWriter(logger);
     }
 
+    /// <summary>
+    /// Executes the configured scan and writes the SBOM output.
+    /// </summary>
     public void Run()
     {
         var projectDependencyMap = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
@@ -68,6 +97,11 @@ internal sealed class SbomGenerator
         }
     }
 
+    /// <summary>
+    /// Executes Visual Studio scanning and populates dependency collections.
+    /// </summary>
+    /// <param name="projectDependencyMap">Project-to-dependency map to populate.</param>
+    /// <param name="dependencySummaries">Dependency summary map to populate.</param>
     private void RunVisualStudioScan(
         Dictionary<string, HashSet<string>> projectDependencyMap,
         Dictionary<(string Id, DependencyType Type), DependencySummary> dependencySummaries)
@@ -104,6 +138,11 @@ internal sealed class SbomGenerator
         }
     }
 
+    /// <summary>
+    /// Executes CMake scanning and populates dependency collections.
+    /// </summary>
+    /// <param name="projectDependencyMap">Project-to-dependency map to populate.</param>
+    /// <param name="dependencySummaries">Dependency summary map to populate.</param>
     private void RunCMakeScan(
         Dictionary<string, HashSet<string>> projectDependencyMap,
         Dictionary<(string Id, DependencyType Type), DependencySummary> dependencySummaries)
@@ -127,6 +166,13 @@ internal sealed class SbomGenerator
         }
     }
 
+    /// <summary>
+    /// Adds dependency details to the project map and summary table.
+    /// </summary>
+    /// <param name="projectKey">Key for the project entry.</param>
+    /// <param name="dependencies">Dependencies to record.</param>
+    /// <param name="dependencySet">Set that stores dependency keys per project.</param>
+    /// <param name="dependencySummaries">Summary map for dependency metadata.</param>
     private void AddDependencies(
         string projectKey,
         IEnumerable<Dependency> dependencies,
@@ -169,6 +215,11 @@ internal sealed class SbomGenerator
         }
     }
 
+    /// <summary>
+    /// Returns a root-relative path when possible.
+    /// </summary>
+    /// <param name="path">Path to normalize.</param>
+    /// <returns>Relative or absolute path string.</returns>
     private string Relativize(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -185,6 +236,11 @@ internal sealed class SbomGenerator
         return fullPath;
     }
 
+    /// <summary>
+    /// Returns a root-relative path, or an empty string for missing values.
+    /// </summary>
+    /// <param name="path">Path to normalize.</param>
+    /// <returns>Relative path or empty string.</returns>
     private string RelativizeOrAbsolute(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -195,6 +251,13 @@ internal sealed class SbomGenerator
         return Relativize(path);
     }
 
+    /// <summary>
+    /// Builds an SPDX document from project dependencies.
+    /// </summary>
+    /// <param name="projectDependencyMap">Project-to-dependency map.</param>
+    /// <param name="dependencies">Flattened dependency summaries.</param>
+    /// <param name="generatedAt">Generation timestamp.</param>
+    /// <returns>SPDX document payload.</returns>
     private SpdxDocument BuildSpdxDocument(
         Dictionary<string, HashSet<string>> projectDependencyMap,
         List<DependencySummary> dependencies,
@@ -246,6 +309,13 @@ internal sealed class SbomGenerator
             relationships);
     }
 
+    /// <summary>
+    /// Builds a CycloneDX BOM from project dependencies.
+    /// </summary>
+    /// <param name="projectDependencyMap">Project-to-dependency map.</param>
+    /// <param name="dependencies">Flattened dependency summaries.</param>
+    /// <param name="generatedAt">Generation timestamp.</param>
+    /// <returns>CycloneDX BOM payload.</returns>
     private CycloneDxBom BuildCycloneDxBom(
         Dictionary<string, HashSet<string>> projectDependencyMap,
         List<DependencySummary> dependencies,
@@ -308,6 +378,13 @@ internal sealed class SbomGenerator
         };
     }
 
+    /// <summary>
+    /// Ensures a unique SPDX identifier for a key.
+    /// </summary>
+    /// <param name="key">Key to normalize into an SPDX ID.</param>
+    /// <param name="existing">Existing mapping of keys to IDs.</param>
+    /// <param name="used">Set of IDs already in use.</param>
+    /// <returns>Stable SPDX identifier.</returns>
     private static string EnsureSpdxId(string key, Dictionary<string, string> existing, HashSet<string> used)
     {
         if (existing.TryGetValue(key, out var current))
@@ -334,6 +411,11 @@ internal sealed class SbomGenerator
         return candidate;
     }
 
+    /// <summary>
+    /// Maps internal dependency types to CycloneDX component types.
+    /// </summary>
+    /// <param name="type">Dependency type to map.</param>
+    /// <returns>CycloneDX component type string.</returns>
     private static string MapCycloneDxType(DependencyType type) =>
         type switch
         {
@@ -344,6 +426,12 @@ internal sealed class SbomGenerator
             _ => "library"
         };
 
+    /// <summary>
+    /// Builds a normalized CycloneDX reference string.
+    /// </summary>
+    /// <param name="prefix">Prefix to use in the reference.</param>
+    /// <param name="value">Value to normalize.</param>
+    /// <returns>Normalized reference string.</returns>
     private static string BuildCycloneDxRef(string prefix, string value)
     {
         var normalized = new string(value.Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray()).Trim('-');
@@ -354,6 +442,15 @@ internal sealed class SbomGenerator
         return $"{prefix}-{normalized}";
     }
 
+    /// <summary>
+    /// Ensures a unique CycloneDX reference for a key.
+    /// </summary>
+    /// <param name="key">Key to map.</param>
+    /// <param name="existing">Existing key-to-ref mapping.</param>
+    /// <param name="used">Set of references already used.</param>
+    /// <param name="prefix">Reference prefix.</param>
+    /// <param name="value">Reference value to normalize.</param>
+    /// <returns>Stable CycloneDX reference.</returns>
     private static string EnsureCycloneDxRef(
         string key,
         Dictionary<string, string> existing,
@@ -379,6 +476,11 @@ internal sealed class SbomGenerator
         return candidate;
     }
 
+    /// <summary>
+    /// Builds CycloneDX properties for a dependency summary.
+    /// </summary>
+    /// <param name="dependency">Dependency summary details.</param>
+    /// <returns>Property list or null if none.</returns>
     private static IReadOnlyList<CycloneDxProperty>? BuildCycloneDxProperties(DependencySummary dependency)
     {
         var properties = new List<CycloneDxProperty>

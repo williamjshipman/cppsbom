@@ -7,10 +7,20 @@ using Xunit;
 
 namespace CppSbom.Tests;
 
+/// <summary>
+/// Tests CMake scanning and analysis behavior.
+/// </summary>
 public sealed class CMakeSupportTests
 {
+    /// <summary>
+    /// Creates a logger instance for tests.
+    /// </summary>
+    /// <returns>Logger instance.</returns>
     private static ILogger CreateLogger() => new LoggerConfiguration().MinimumLevel.Debug().CreateLogger();
 
+    /// <summary>
+    /// Verifies the default scan type is Visual Studio.
+    /// </summary>
     [Fact]
     public void Parse_DefaultsToVisualStudio()
     {
@@ -18,6 +28,9 @@ public sealed class CMakeSupportTests
         Assert.Equal(ScanType.VisualStudio, options.Type);
     }
 
+    /// <summary>
+    /// Verifies that parsing cmake scan type selects CMake.
+    /// </summary>
     [Fact]
     public void Parse_CMakeType()
     {
@@ -25,6 +38,9 @@ public sealed class CMakeSupportTests
         Assert.Equal(ScanType.CMake, options.Type);
     }
 
+    /// <summary>
+    /// Verifies that unsupported scan types fail parsing.
+    /// </summary>
     [Fact]
     public void Parse_InvalidTypeThrows()
     {
@@ -32,6 +48,9 @@ public sealed class CMakeSupportTests
         Assert.Contains("Unknown scan type", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Verifies that root CMakeLists.txt is required for scanning.
+    /// </summary>
     [Fact]
     public void Scan_CMakeListsRequiresRootFile()
     {
@@ -42,6 +61,9 @@ public sealed class CMakeSupportTests
         Assert.Contains("CMakeLists.txt", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Verifies root parse errors are fatal.
+    /// </summary>
     [Fact]
     public void Scan_RootParseErrorIsFatal()
     {
@@ -52,6 +74,9 @@ public sealed class CMakeSupportTests
         Assert.Throws<InvalidOperationException>(() => scanner.Scan(workspace.Root));
     }
 
+    /// <summary>
+    /// Verifies non-root parse errors are logged but non-fatal.
+    /// </summary>
     [Fact]
     public void Scan_NonRootParseErrorIsNonFatal()
     {
@@ -65,6 +90,9 @@ public sealed class CMakeSupportTests
         Assert.Empty(graph.TargetsById);
     }
 
+    /// <summary>
+    /// Verifies add_subdirectory can traverse outside root.
+    /// </summary>
     [Fact]
     public void Scan_AddSubdirectoryIncludesOutsideRoot()
     {
@@ -86,6 +114,9 @@ public sealed class CMakeSupportTests
         Assert.Contains(graph.TargetsById.Keys, key => key.Contains("external", StringComparison.Ordinal) && key.EndsWith("extlib", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Verifies nested add_subdirectory discovery.
+    /// </summary>
     [Fact]
     public void Scan_NestedAddSubdirectoryTargetsDiscovered()
     {
@@ -101,6 +132,9 @@ public sealed class CMakeSupportTests
         Assert.Contains(graph.TargetsById.Keys, key => key == "sub/nested::app");
     }
 
+    /// <summary>
+    /// Verifies non-literal add_subdirectory entries are ignored.
+    /// </summary>
     [Fact]
     public void Scan_IgnoresNonLiteralAddSubdirectory()
     {
@@ -115,6 +149,9 @@ public sealed class CMakeSupportTests
         Assert.Single(graph.TargetsById);
     }
 
+    /// <summary>
+    /// Verifies normalized target identifiers are produced.
+    /// </summary>
     [Fact]
     public void Scan_TargetIdentifiersAreNormalized()
     {
@@ -129,6 +166,9 @@ public sealed class CMakeSupportTests
         Assert.Contains(graph.TargetsById.Keys, key => key == "subdir::foo");
     }
 
+    /// <summary>
+    /// Verifies target identifier collisions are fatal.
+    /// </summary>
     [Fact]
     public void Scan_TargetIdentifierCollisionsAreFatal()
     {
@@ -141,6 +181,9 @@ public sealed class CMakeSupportTests
         Assert.Throws<InvalidOperationException>(() => scanner.Scan(workspace.Root));
     }
 
+    /// <summary>
+    /// Verifies non-literal target arguments are ignored.
+    /// </summary>
     [Fact]
     public void Scan_NonLiteralTargetArgumentsAreIgnored()
     {
@@ -158,6 +201,9 @@ public sealed class CMakeSupportTests
         Assert.DoesNotContain(target.Sources, path => path.Contains("${SRC}", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Verifies link libraries appear as dependencies and includes do not.
+    /// </summary>
     [Fact]
     public void Analyze_LinkLibrariesAndIncludeDirectories()
     {
@@ -178,6 +224,9 @@ public sealed class CMakeSupportTests
         Assert.DoesNotContain(dependencies, dep => dep.Type == DependencyType.HeaderInclude && dep.ResolvedPath?.Contains("include") == true);
     }
 
+    /// <summary>
+    /// Verifies link file paths are recorded as file dependencies.
+    /// </summary>
     [Fact]
     public void Analyze_LinkFilePathsAreRecordedAsFiles()
     {
@@ -199,6 +248,9 @@ public sealed class CMakeSupportTests
         Assert.Contains(dependencies, dep => dep.ResolvedPath is not null && dep.ResolvedPath.EndsWith("libbar.lib", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Verifies include directories are deduped and must exist.
+    /// </summary>
     [Fact]
     public void Analyze_IncludeDirectoriesAreDedupedAndExist()
     {
@@ -220,6 +272,9 @@ public sealed class CMakeSupportTests
         Assert.DoesNotContain(includeDirs, path => path.EndsWith("Missing", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Verifies third-party roots apply when scanning outside root.
+    /// </summary>
     [Fact]
     public void Analyze_ThirdPartyRootsApplyOutsideRoot()
     {
@@ -243,8 +298,14 @@ public sealed class CMakeSupportTests
     }
 }
 
+/// <summary>
+/// Creates a temporary workspace for filesystem-based tests.
+/// </summary>
 internal sealed class TempWorkspace : IDisposable
 {
+    /// <summary>
+    /// Initializes a new temporary workspace.
+    /// </summary>
     public TempWorkspace()
     {
         BaseDirectory = Path.Combine(Path.GetTempPath(), "cppsbom-tests", Guid.NewGuid().ToString("N"));
@@ -253,10 +314,21 @@ internal sealed class TempWorkspace : IDisposable
         Directory.CreateDirectory(Root);
     }
 
+    /// <summary>
+    /// Gets the base directory for this workspace.
+    /// </summary>
     public string BaseDirectory { get; }
 
+    /// <summary>
+    /// Gets the root directory used for scans.
+    /// </summary>
     public string Root { get; }
 
+    /// <summary>
+    /// Creates a directory under the workspace root.
+    /// </summary>
+    /// <param name="parts">Path segments under the root.</param>
+    /// <returns>Created directory path.</returns>
     public string CreateDirectory(params string[] parts)
     {
         var path = Path.Combine(new[] { Root }.Concat(parts).ToArray());
@@ -264,6 +336,11 @@ internal sealed class TempWorkspace : IDisposable
         return path;
     }
 
+    /// <summary>
+    /// Creates a sibling directory next to the root folder.
+    /// </summary>
+    /// <param name="name">Directory name.</param>
+    /// <returns>Created directory path.</returns>
     public string CreateSiblingDirectory(string name)
     {
         var path = Path.Combine(BaseDirectory, name);
@@ -271,6 +348,12 @@ internal sealed class TempWorkspace : IDisposable
         return path;
     }
 
+    /// <summary>
+    /// Writes a file under the workspace root.
+    /// </summary>
+    /// <param name="relativePath">Path relative to the root.</param>
+    /// <param name="content">File content.</param>
+    /// <returns>Written file path.</returns>
     public string WriteFile(string relativePath, string content)
     {
         var path = Path.Combine(Root, relativePath);
@@ -283,6 +366,9 @@ internal sealed class TempWorkspace : IDisposable
         return path;
     }
 
+    /// <summary>
+    /// Removes the workspace directories.
+    /// </summary>
     public void Dispose()
     {
         if (Directory.Exists(BaseDirectory))

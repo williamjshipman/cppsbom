@@ -1,17 +1,41 @@
-using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Serilog;
 
 namespace CppSbom;
 
+/// <summary>
+/// Analyzes Visual Studio project files to resolve dependencies.
+/// </summary>
 internal sealed class ProjectAnalyzer
 {
+    /// <summary>
+    /// Parsed command line options for the run.
+    /// </summary>
     private readonly CommandLineOptions _options;
+    /// <summary>
+    /// Logger used for analysis diagnostics.
+    /// </summary>
     private readonly ILogger _logger;
+    /// <summary>
+    /// Scanner used for source-level dependency discovery.
+    /// </summary>
     private readonly SourceScanner _sourceScanner;
+    /// <summary>
+    /// COM metadata resolver for ProgIDs and CLSIDs.
+    /// </summary>
     private readonly IComResolver _comResolver;
+    /// <summary>
+    /// Dependency comparer used for set equality.
+    /// </summary>
     private readonly DependencyIdentityComparer _dependencyComparer = new();
 
+    /// <summary>
+    /// Initializes a new project analyzer.
+    /// </summary>
+    /// <param name="options">Parsed command line options.</param>
+    /// <param name="logger">Logger for diagnostics.</param>
+    /// <param name="sourceScanner">Source scanner for headers and imports.</param>
+    /// <param name="comResolver">COM resolver for registry references.</param>
     public ProjectAnalyzer(CommandLineOptions options, ILogger logger, SourceScanner sourceScanner, IComResolver comResolver)
     {
         _options = options;
@@ -20,6 +44,12 @@ internal sealed class ProjectAnalyzer
         _comResolver = comResolver;
     }
 
+    /// <summary>
+    /// Analyzes a Visual Studio project and returns dependency information.
+    /// </summary>
+    /// <param name="projectPath">Path to the project file.</param>
+    /// <param name="solutionDir">Solution directory for relative resolution.</param>
+    /// <returns>Project analysis results.</returns>
     public ProjectAnalysis Analyze(string projectPath, string? solutionDir)
     {
         _logger.Information("Analyzing project {Project}", projectPath);
@@ -45,6 +75,13 @@ internal sealed class ProjectAnalyzer
         return new ProjectAnalysis(projectPath, dependencies.ToList(), internalOutputs.ToList());
     }
 
+    /// <summary>
+    /// Adds header include dependencies discovered in source files.
+    /// </summary>
+    /// <param name="scanResult">Source scan results.</param>
+    /// <param name="includeDirs">Include search paths.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="projectDir">Project directory.</param>
     private void ProcessIncludes(SourceScanResult scanResult, List<string> includeDirs, HashSet<Dependency> dependencies, string projectDir)
     {
         foreach (var include in scanResult.Includes)
@@ -70,6 +107,12 @@ internal sealed class ProjectAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds import directive dependencies discovered in source files.
+    /// </summary>
+    /// <param name="scanResult">Source scan results.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="projectDir">Project directory.</param>
     private void ProcessImports(SourceScanResult scanResult, HashSet<Dependency> dependencies, string projectDir)
     {
         foreach (var directive in scanResult.Imports)
@@ -90,6 +133,16 @@ internal sealed class ProjectAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds static library dependencies declared in project metadata.
+    /// </summary>
+    /// <param name="doc">Project XML document.</param>
+    /// <param name="ns">XML namespace.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="projectDir">Project directory.</param>
+    /// <param name="solutionDir">Solution directory.</param>
+    /// <param name="libraryDirs">Library search paths.</param>
+    /// <param name="internalOutputs">Internal outputs set to populate.</param>
     private void ProcessStaticLibraries(XDocument doc, XNamespace ns, HashSet<Dependency> dependencies, string projectDir, string solutionDir, List<string> libraryDirs, HashSet<string> internalOutputs)
     {
         var libs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -128,6 +181,15 @@ internal sealed class ProjectAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds static library dependencies from pragma comment directives.
+    /// </summary>
+    /// <param name="scanResult">Source scan results.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="projectDir">Project directory.</param>
+    /// <param name="solutionDir">Solution directory.</param>
+    /// <param name="libraryDirs">Library search paths.</param>
+    /// <param name="internalOutputs">Internal outputs set to populate.</param>
     private void ProcessPragmaLibs(SourceScanResult scanResult, HashSet<Dependency> dependencies, string projectDir, string solutionDir, List<string> libraryDirs, HashSet<string> internalOutputs)
     {
         foreach (var directive in scanResult.PragmaLibs)
@@ -161,6 +223,11 @@ internal sealed class ProjectAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds COM dependencies discovered in source files.
+    /// </summary>
+    /// <param name="scanResult">Source scan results.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
     private void ProcessComReferences(SourceScanResult scanResult, HashSet<Dependency> dependencies)
     {
         foreach (var progId in scanResult.ProgIds)
@@ -186,6 +253,12 @@ internal sealed class ProjectAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds a COM dependency to the dependency set.
+    /// </summary>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="metadata">Resolved COM metadata.</param>
+    /// <param name="sourcePath">Source file path.</param>
     private void AddComDependency(HashSet<Dependency> dependencies, ComMetadata metadata, string sourcePath)
     {
         var identifier = metadata.ProgId ?? metadata.Clsid ?? "UnknownCOM";
@@ -210,6 +283,13 @@ internal sealed class ProjectAnalyzer
         });
     }
 
+    /// <summary>
+    /// Resolves include paths using the include search paths.
+    /// </summary>
+    /// <param name="include">Include match to resolve.</param>
+    /// <param name="includeDirs">Include search paths.</param>
+    /// <param name="projectDir">Project directory.</param>
+    /// <returns>Resolved include path or null.</returns>
     private string? ResolveInclude(IncludeMatch include, List<string> includeDirs, string projectDir)
     {
         var sourceDir = Path.GetDirectoryName(include.FilePath)!;
@@ -236,6 +316,13 @@ internal sealed class ProjectAnalyzer
         return File.Exists(projectCandidate) ? projectCandidate : null;
     }
 
+    /// <summary>
+    /// Resolves a relative path from a base directory or project directory.
+    /// </summary>
+    /// <param name="value">Relative value to resolve.</param>
+    /// <param name="baseDir">Base directory to check first.</param>
+    /// <param name="projectDir">Fallback project directory.</param>
+    /// <returns>Resolved file path or null.</returns>
     private string? TryResolveRelative(string value, string baseDir, string projectDir)
     {
         var full = Path.GetFullPath(Path.Combine(baseDir, value));
@@ -248,6 +335,14 @@ internal sealed class ProjectAnalyzer
         return File.Exists(full) ? full : null;
     }
 
+    /// <summary>
+    /// Resolves library references from known search paths.
+    /// </summary>
+    /// <param name="value">Library value to resolve.</param>
+    /// <param name="projectDir">Project directory.</param>
+    /// <param name="solutionDir">Solution directory.</param>
+    /// <param name="additionalRoots">Additional search roots.</param>
+    /// <returns>Resolved library path or null.</returns>
     private string? TryResolveLibrary(string value, string projectDir, string solutionDir, IEnumerable<string> additionalRoots)
     {
         var expanded = ExpandMacros(value, projectDir, solutionDir);
@@ -300,6 +395,11 @@ internal sealed class ProjectAnalyzer
         return null;
     }
 
+    /// <summary>
+    /// Determines whether a path is internal to the root directory.
+    /// </summary>
+    /// <param name="path">Path to evaluate.</param>
+    /// <returns>True when the path is internal.</returns>
     private bool IsInternal(string path)
     {
         var normalized = Path.GetFullPath(path);
@@ -318,6 +418,11 @@ internal sealed class ProjectAnalyzer
         return false;
     }
 
+    /// <summary>
+    /// Builds a dependency identifier from a file path.
+    /// </summary>
+    /// <param name="path">Resolved file path.</param>
+    /// <returns>Dependency identifier.</returns>
     private string BuildIdentifierFromPath(string path)
     {
         foreach (var third in _options.ThirdPartyDirectories)
@@ -341,6 +446,14 @@ internal sealed class ProjectAnalyzer
         return Path.GetFileName(path);
     }
 
+    /// <summary>
+    /// Collects include directories from project metadata.
+    /// </summary>
+    /// <param name="doc">Project XML document.</param>
+    /// <param name="ns">XML namespace.</param>
+    /// <param name="projectDir">Project directory.</param>
+    /// <param name="solutionDir">Solution directory.</param>
+    /// <returns>Include directory paths.</returns>
     private IEnumerable<string> GatherIncludeDirectories(XDocument doc, XNamespace ns, string projectDir, string solutionDir)
     {
         var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -378,6 +491,14 @@ internal sealed class ProjectAnalyzer
         return dirs;
     }
 
+    /// <summary>
+    /// Collects library directories from project metadata.
+    /// </summary>
+    /// <param name="doc">Project XML document.</param>
+    /// <param name="ns">XML namespace.</param>
+    /// <param name="projectDir">Project directory.</param>
+    /// <param name="solutionDir">Solution directory.</param>
+    /// <returns>Library directory paths.</returns>
     private IEnumerable<string> GatherLibraryDirectories(XDocument doc, XNamespace ns, string projectDir, string solutionDir)
     {
         var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -418,6 +539,13 @@ internal sealed class ProjectAnalyzer
         return dirs;
     }
 
+    /// <summary>
+    /// Collects source files listed in the project.
+    /// </summary>
+    /// <param name="doc">Project XML document.</param>
+    /// <param name="ns">XML namespace.</param>
+    /// <param name="projectDir">Project directory.</param>
+    /// <returns>Source file paths.</returns>
     private IEnumerable<string> GatherSourceFiles(XDocument doc, XNamespace ns, string projectDir)
     {
         foreach (var item in doc.Descendants(ns + "ClCompile"))
@@ -433,6 +561,13 @@ internal sealed class ProjectAnalyzer
         }
     }
 
+    /// <summary>
+    /// Collects header files listed in the project.
+    /// </summary>
+    /// <param name="doc">Project XML document.</param>
+    /// <param name="ns">XML namespace.</param>
+    /// <param name="projectDir">Project directory.</param>
+    /// <returns>Header file paths.</returns>
     private IEnumerable<string> GatherHeaderFiles(XDocument doc, XNamespace ns, string projectDir)
     {
         foreach (var item in doc.Descendants(ns + "ClInclude"))
@@ -447,9 +582,21 @@ internal sealed class ProjectAnalyzer
         }
     }
 
+    /// <summary>
+    /// Splits a semicolon-delimited list value.
+    /// </summary>
+    /// <param name="value">Raw value string.</param>
+    /// <returns>Individual entries.</returns>
     private static IEnumerable<string> SplitSemicolonList(string value) =>
         value.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+    /// <summary>
+    /// Expands common MSBuild macros in a path string.
+    /// </summary>
+    /// <param name="value">Raw value containing macros.</param>
+    /// <param name="projectDir">Project directory.</param>
+    /// <param name="solutionDir">Solution directory.</param>
+    /// <returns>Expanded value.</returns>
     private static string ExpandMacros(string value, string projectDir, string solutionDir)
     {
         var expanded = value.Replace("$(ProjectDir)", EnsureTrailingSeparator(projectDir), StringComparison.OrdinalIgnoreCase)
@@ -460,6 +607,11 @@ internal sealed class ProjectAnalyzer
         return Environment.ExpandEnvironmentVariables(expanded);
     }
 
+    /// <summary>
+    /// Ensures a directory path ends with a separator.
+    /// </summary>
+    /// <param name="path">Path to normalize.</param>
+    /// <returns>Path with trailing separator.</returns>
     private static string EnsureTrailingSeparator(string path)
     {
         if (!path.EndsWith(Path.DirectorySeparatorChar) && !path.EndsWith(Path.AltDirectorySeparatorChar))
@@ -471,8 +623,17 @@ internal sealed class ProjectAnalyzer
     }
 }
 
+/// <summary>
+/// Compares dependencies by identifier and type.
+/// </summary>
 internal sealed class DependencyIdentityComparer : IEqualityComparer<Dependency>
 {
+    /// <summary>
+    /// Determines equality between dependencies.
+    /// </summary>
+    /// <param name="x">First dependency.</param>
+    /// <param name="y">Second dependency.</param>
+    /// <returns>True when dependencies match by type and identifier.</returns>
     public bool Equals(Dependency? x, Dependency? y)
     {
         if (ReferenceEquals(x, y))
@@ -487,6 +648,11 @@ internal sealed class DependencyIdentityComparer : IEqualityComparer<Dependency>
         return string.Equals(x.Identifier, y.Identifier, StringComparison.OrdinalIgnoreCase) && x.Type == y.Type;
     }
 
+    /// <summary>
+    /// Computes a hash code for a dependency.
+    /// </summary>
+    /// <param name="obj">Dependency to hash.</param>
+    /// <returns>Hash code.</returns>
     public int GetHashCode(Dependency obj)
     {
         return HashCode.Combine(obj.Type, StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Identifier));

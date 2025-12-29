@@ -2,15 +2,44 @@ using Serilog;
 
 namespace CppSbom;
 
+/// <summary>
+/// Analyzes CMake targets to resolve dependencies.
+/// </summary>
 internal sealed class CMakeTargetAnalyzer
 {
+    /// <summary>
+    /// Parsed command line options.
+    /// </summary>
     private readonly CommandLineOptions _options;
+    /// <summary>
+    /// Logger used for diagnostics.
+    /// </summary>
     private readonly ILogger _logger;
+    /// <summary>
+    /// Source scanner for include/import/pragma analysis.
+    /// </summary>
     private readonly SourceScanner _sourceScanner;
+    /// <summary>
+    /// COM metadata resolver.
+    /// </summary>
     private readonly IComResolver _comResolver;
+    /// <summary>
+    /// CMake target graph for resolution.
+    /// </summary>
     private readonly CMakeProjectGraph _graph;
+    /// <summary>
+    /// Dependency comparer for set equality.
+    /// </summary>
     private readonly DependencyIdentityComparer _dependencyComparer = new();
 
+    /// <summary>
+    /// Initializes a new CMake target analyzer.
+    /// </summary>
+    /// <param name="options">Parsed command line options.</param>
+    /// <param name="logger">Logger for diagnostics.</param>
+    /// <param name="sourceScanner">Source scanner for includes and imports.</param>
+    /// <param name="comResolver">COM resolver for registry lookups.</param>
+    /// <param name="graph">CMake project graph.</param>
     public CMakeTargetAnalyzer(
         CommandLineOptions options,
         ILogger logger,
@@ -25,6 +54,11 @@ internal sealed class CMakeTargetAnalyzer
         _graph = graph;
     }
 
+    /// <summary>
+    /// Analyzes a CMake target and returns resolved dependencies.
+    /// </summary>
+    /// <param name="target">Target to analyze.</param>
+    /// <returns>Dependencies for the target.</returns>
     public IReadOnlyCollection<Dependency> Analyze(CMakeTargetDefinition target)
     {
         var includeDirs = BuildIncludeDirectories(target);
@@ -41,11 +75,21 @@ internal sealed class CMakeTargetAnalyzer
         return dependencies.ToList();
     }
 
+    /// <summary>
+    /// Returns the include directories used for a target analysis.
+    /// </summary>
+    /// <param name="target">Target to inspect.</param>
+    /// <returns>Resolved include directories.</returns>
     internal IReadOnlyList<string> GetIncludeDirectoriesForTarget(CMakeTargetDefinition target)
     {
         return BuildIncludeDirectories(target);
     }
 
+    /// <summary>
+    /// Builds include search paths for a target.
+    /// </summary>
+    /// <param name="target">Target definition.</param>
+    /// <returns>Include directory list.</returns>
     private List<string> BuildIncludeDirectories(CMakeTargetDefinition target)
     {
         var dirs = new List<string>
@@ -76,6 +120,11 @@ internal sealed class CMakeTargetAnalyzer
         return DeduplicatePaths(dirs);
     }
 
+    /// <summary>
+    /// Builds library search paths for a target.
+    /// </summary>
+    /// <param name="targetDirectory">Target directory.</param>
+    /// <returns>Library directory list.</returns>
     private List<string> BuildLibraryDirectories(string targetDirectory)
     {
         var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -99,6 +148,11 @@ internal sealed class CMakeTargetAnalyzer
         return dirs.ToList();
     }
 
+    /// <summary>
+    /// Deduplicates paths after normalization.
+    /// </summary>
+    /// <param name="paths">Paths to deduplicate.</param>
+    /// <returns>Deduplicated path list.</returns>
     private static List<string> DeduplicatePaths(IEnumerable<string> paths)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -115,6 +169,13 @@ internal sealed class CMakeTargetAnalyzer
         return deduped;
     }
 
+    /// <summary>
+    /// Adds header include dependencies discovered in source files.
+    /// </summary>
+    /// <param name="scanResult">Source scan results.</param>
+    /// <param name="includeDirs">Include search paths.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="projectDir">Target directory.</param>
     private void ProcessIncludes(SourceScanResult scanResult, List<string> includeDirs, HashSet<Dependency> dependencies, string projectDir)
     {
         foreach (var include in scanResult.Includes)
@@ -140,6 +201,12 @@ internal sealed class CMakeTargetAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds import directive dependencies discovered in source files.
+    /// </summary>
+    /// <param name="scanResult">Source scan results.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="projectDir">Target directory.</param>
     private void ProcessImports(SourceScanResult scanResult, HashSet<Dependency> dependencies, string projectDir)
     {
         foreach (var directive in scanResult.Imports)
@@ -160,6 +227,13 @@ internal sealed class CMakeTargetAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds dependencies from linked library entries.
+    /// </summary>
+    /// <param name="target">Target definition.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="projectDir">Target directory.</param>
+    /// <param name="internalOutputs">Internal outputs set to populate.</param>
     private void ProcessLinkedLibraries(
         CMakeTargetDefinition target,
         HashSet<Dependency> dependencies,
@@ -204,6 +278,14 @@ internal sealed class CMakeTargetAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds dependencies from pragma comment lib directives.
+    /// </summary>
+    /// <param name="scanResult">Source scan results.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="projectDir">Target directory.</param>
+    /// <param name="libraryDirs">Library search paths.</param>
+    /// <param name="internalOutputs">Internal outputs set to populate.</param>
     private void ProcessPragmaLibs(
         SourceScanResult scanResult,
         HashSet<Dependency> dependencies,
@@ -242,6 +324,11 @@ internal sealed class CMakeTargetAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds COM dependencies discovered in source files.
+    /// </summary>
+    /// <param name="scanResult">Source scan results.</param>
+    /// <param name="dependencies">Dependency set to populate.</param>
     private void ProcessComReferences(SourceScanResult scanResult, HashSet<Dependency> dependencies)
     {
         foreach (var progId in scanResult.ProgIds)
@@ -267,6 +354,12 @@ internal sealed class CMakeTargetAnalyzer
         }
     }
 
+    /// <summary>
+    /// Adds a COM dependency to the dependency set.
+    /// </summary>
+    /// <param name="dependencies">Dependency set to populate.</param>
+    /// <param name="metadata">Resolved COM metadata.</param>
+    /// <param name="sourcePath">Source file path.</param>
     private void AddComDependency(HashSet<Dependency> dependencies, ComMetadata metadata, string sourcePath)
     {
         var identifier = metadata.ProgId ?? metadata.Clsid ?? "UnknownCOM";
@@ -291,6 +384,13 @@ internal sealed class CMakeTargetAnalyzer
         });
     }
 
+    /// <summary>
+    /// Resolves include paths using include search paths.
+    /// </summary>
+    /// <param name="include">Include match to resolve.</param>
+    /// <param name="includeDirs">Include search paths.</param>
+    /// <param name="projectDir">Target directory.</param>
+    /// <returns>Resolved include path or null.</returns>
     private string? ResolveInclude(IncludeMatch include, List<string> includeDirs, string projectDir)
     {
         var sourceDir = Path.GetDirectoryName(include.FilePath)!;
@@ -316,6 +416,13 @@ internal sealed class CMakeTargetAnalyzer
         return File.Exists(projectCandidate) ? projectCandidate : null;
     }
 
+    /// <summary>
+    /// Resolves a relative path from a base directory or project directory.
+    /// </summary>
+    /// <param name="value">Relative value to resolve.</param>
+    /// <param name="baseDir">Base directory to check first.</param>
+    /// <param name="projectDir">Fallback project directory.</param>
+    /// <returns>Resolved file path or null.</returns>
     private string? TryResolveRelative(string value, string baseDir, string projectDir)
     {
         var full = Path.GetFullPath(Path.Combine(baseDir, value));
@@ -328,6 +435,14 @@ internal sealed class CMakeTargetAnalyzer
         return File.Exists(full) ? full : null;
     }
 
+    /// <summary>
+    /// Resolves library references from known search paths.
+    /// </summary>
+    /// <param name="value">Library value to resolve.</param>
+    /// <param name="projectDir">Target directory.</param>
+    /// <param name="solutionDir">Root directory.</param>
+    /// <param name="additionalRoots">Additional search roots.</param>
+    /// <returns>Resolved library path or null.</returns>
     private string? TryResolveLibrary(string value, string projectDir, string solutionDir, IEnumerable<string> additionalRoots)
     {
         if (Path.IsPathRooted(value))
@@ -370,6 +485,11 @@ internal sealed class CMakeTargetAnalyzer
         return null;
     }
 
+    /// <summary>
+    /// Determines whether a path is internal to the root directory.
+    /// </summary>
+    /// <param name="path">Path to evaluate.</param>
+    /// <returns>True when the path is internal.</returns>
     private bool IsInternal(string path)
     {
         var normalized = Path.GetFullPath(path);
@@ -388,6 +508,11 @@ internal sealed class CMakeTargetAnalyzer
         return false;
     }
 
+    /// <summary>
+    /// Builds a dependency identifier from a file path.
+    /// </summary>
+    /// <param name="path">Resolved file path.</param>
+    /// <returns>Dependency identifier.</returns>
     private string BuildIdentifierFromPath(string path)
     {
         foreach (var third in _options.ThirdPartyDirectories)
@@ -411,6 +536,11 @@ internal sealed class CMakeTargetAnalyzer
         return Path.GetFileName(path);
     }
 
+    /// <summary>
+    /// Normalizes a path for deduplication.
+    /// </summary>
+    /// <param name="path">Path to normalize.</param>
+    /// <returns>Normalized path.</returns>
     private static string NormalizePath(string path) =>
         Path.GetFullPath(path).Replace('\\', '/').ToLowerInvariant();
 }

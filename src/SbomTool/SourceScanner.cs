@@ -2,13 +2,34 @@ using System.Text.RegularExpressions;
 
 namespace CppSbom;
 
+/// <summary>
+/// Scans source files for include, import, pragma, and COM references.
+/// </summary>
 internal sealed class SourceScanner
 {
+    /// <summary>
+    /// Regex for C/C++ include directives.
+    /// </summary>
     private static readonly Regex IncludeRegex = new(@"#\s*include\s*(?<delim>[<""])(?<path>[^>""]+)[>""]", RegexOptions.Compiled);
+    /// <summary>
+    /// Regex for C++20 import directives.
+    /// </summary>
     private static readonly Regex ImportRegex = new(@"#\s*import\s*""(?<path>[^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    /// <summary>
+    /// Regex for pragma comment lib directives.
+    /// </summary>
     private static readonly Regex PragmaLibRegex = new(@"#\s*pragma\s+comment\s*\(\s*lib\s*,\s*""(?<lib>[^""]+)""\s*\)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    /// <summary>
+    /// Regex for GUID literals.
+    /// </summary>
     private static readonly Regex GuidRegex = new(@"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}", RegexOptions.Compiled);
+    /// <summary>
+    /// Regex for string literals used to detect ProgIDs.
+    /// </summary>
     private static readonly Regex StringLiteralRegex = new(@"(?:(?:L|u|U|u8)?""(?<value>[^""\\\n]{3,})"")", RegexOptions.Compiled);
+    /// <summary>
+    /// Extensions that disqualify ProgID candidates.
+    /// </summary>
     private static readonly HashSet<string> DisallowedProgIdExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".h",
@@ -25,6 +46,11 @@ internal sealed class SourceScanner
         ".manifest"
     };
 
+    /// <summary>
+    /// Scans a set of files and returns matched directives.
+    /// </summary>
+    /// <param name="files">Files to scan.</param>
+    /// <returns>Scan result with collected directives.</returns>
     public SourceScanResult Scan(IEnumerable<string> files)
     {
         var result = new SourceScanResult();
@@ -55,6 +81,12 @@ internal sealed class SourceScanner
         return result;
     }
 
+    /// <summary>
+    /// Scans include directives in file text.
+    /// </summary>
+    /// <param name="file">Source file path.</param>
+    /// <param name="text">File contents.</param>
+    /// <param name="result">Result collection to populate.</param>
     private static void ScanIncludes(string file, string text, SourceScanResult result)
     {
         foreach (Match match in IncludeRegex.Matches(text))
@@ -65,6 +97,12 @@ internal sealed class SourceScanner
         }
     }
 
+    /// <summary>
+    /// Scans import directives in file text.
+    /// </summary>
+    /// <param name="file">Source file path.</param>
+    /// <param name="text">File contents.</param>
+    /// <param name="result">Result collection to populate.</param>
     private static void ScanImports(string file, string text, SourceScanResult result)
     {
         foreach (Match match in ImportRegex.Matches(text))
@@ -74,6 +112,12 @@ internal sealed class SourceScanner
         }
     }
 
+    /// <summary>
+    /// Scans pragma comment lib directives in file text.
+    /// </summary>
+    /// <param name="file">Source file path.</param>
+    /// <param name="text">File contents.</param>
+    /// <param name="result">Result collection to populate.</param>
     private static void ScanPragmaLibs(string file, string text, SourceScanResult result)
     {
         foreach (Match match in PragmaLibRegex.Matches(text))
@@ -83,6 +127,12 @@ internal sealed class SourceScanner
         }
     }
 
+    /// <summary>
+    /// Scans ProgID-like string literals in file text.
+    /// </summary>
+    /// <param name="file">Source file path.</param>
+    /// <param name="text">File contents.</param>
+    /// <param name="result">Result collection to populate.</param>
     private static void ScanProgIds(string file, string text, SourceScanResult result)
     {
         foreach (Match match in StringLiteralRegex.Matches(text))
@@ -100,6 +150,12 @@ internal sealed class SourceScanner
         }
     }
 
+    /// <summary>
+    /// Scans CLSID GUID literals in file text.
+    /// </summary>
+    /// <param name="file">Source file path.</param>
+    /// <param name="text">File contents.</param>
+    /// <param name="result">Result collection to populate.</param>
     private static void ScanClsids(string file, string text, SourceScanResult result)
     {
         foreach (Match match in GuidRegex.Matches(text))
@@ -108,6 +164,11 @@ internal sealed class SourceScanner
         }
     }
 
+    /// <summary>
+    /// Determines whether a string literal matches a ProgID pattern.
+    /// </summary>
+    /// <param name="candidate">Candidate literal string.</param>
+    /// <returns>True when the literal resembles a ProgID.</returns>
     private static bool LooksLikeProgId(string candidate)
     {
         if (!candidate.Contains('.') || candidate.Contains(' ') || candidate.Contains("::") || candidate.Contains('/'))
@@ -146,6 +207,12 @@ internal sealed class SourceScanner
         return char.IsLetter(candidate[0]);
     }
 
+    /// <summary>
+    /// Checks whether a match occurs within a preprocessor directive.
+    /// </summary>
+    /// <param name="text">Full file contents.</param>
+    /// <param name="match">Match to evaluate.</param>
+    /// <returns>True when the match is in a directive line.</returns>
     private static bool IsInPreprocessorDirective(string text, Match match)
     {
         var lineStart = text.LastIndexOf('\n', match.Index);
@@ -166,15 +233,44 @@ internal sealed class SourceScanner
     }
 }
 
+/// <summary>
+/// Represents a parsed include directive.
+/// </summary>
+/// <param name="FilePath">File that contains the include.</param>
+/// <param name="Value">Include value.</param>
+/// <param name="IsSystem">True when the include used angle brackets.</param>
 internal sealed record IncludeMatch(string FilePath, string Value, bool IsSystem);
 
+/// <summary>
+/// Represents a parsed directive match.
+/// </summary>
+/// <param name="FilePath">File that contains the directive.</param>
+/// <param name="Value">Directive value.</param>
 internal sealed record DirectiveMatch(string FilePath, string Value);
 
+/// <summary>
+/// Aggregates directive matches discovered during scanning.
+/// </summary>
 internal sealed class SourceScanResult
 {
+    /// <summary>
+    /// Gets include directives found in scanned files.
+    /// </summary>
     public List<IncludeMatch> Includes { get; } = new();
+    /// <summary>
+    /// Gets import directives found in scanned files.
+    /// </summary>
     public List<DirectiveMatch> Imports { get; } = new();
+    /// <summary>
+    /// Gets pragma comment lib directives found in scanned files.
+    /// </summary>
     public List<DirectiveMatch> PragmaLibs { get; } = new();
+    /// <summary>
+    /// Gets ProgID matches found in scanned files.
+    /// </summary>
     public List<DirectiveMatch> ProgIds { get; } = new();
+    /// <summary>
+    /// Gets CLSID matches found in scanned files.
+    /// </summary>
     public List<DirectiveMatch> Clsids { get; } = new();
 }

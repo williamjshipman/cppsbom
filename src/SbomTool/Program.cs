@@ -2,8 +2,16 @@ using Serilog;
 
 namespace CppSbom;
 
+/// <summary>
+/// Entry point for the cppsbom CLI.
+/// </summary>
 internal static class Program
 {
+    /// <summary>
+    /// Executes the CLI workflow and returns an exit code.
+    /// </summary>
+    /// <param name="args">Command line arguments.</param>
+    /// <returns>Zero on success, non-zero on failure.</returns>
     public static int Main(string[] args)
     {
         var options = CommandLineOptions.Parse(args);
@@ -28,6 +36,10 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// Configures the logger for console and rolling file output.
+    /// </summary>
+    /// <param name="options">Parsed command line options.</param>
     private static void ConfigureLogging(CommandLineOptions options)
     {
         var logPath = options.LogPath;
