@@ -59,6 +59,10 @@ internal sealed record CommandLineOptions
     /// Gets the selected scan type.
     /// </summary>
     public ScanType Type { get; init; } = ScanType.VisualStudio;
+    /// <summary>
+    /// Gets whether internal dependencies are included in output.
+    /// </summary>
+    public bool IncludeInternal { get; init; }
 
     /// <summary>
     /// Parses command line arguments into options.
@@ -79,6 +83,7 @@ internal sealed record CommandLineOptions
         var log = (string?)null;
         var format = OutputFormat.Spdx;
         var scanType = ScanType.VisualStudio;
+        var includeInternal = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -104,6 +109,9 @@ internal sealed record CommandLineOptions
                     break;
                 case "--log":
                     log = RequireValue(args, ref i);
+                    break;
+                case "--include-internal":
+                    includeInternal = true;
                     break;
                 default:
                     throw new ArgumentException($"Unknown argument '{args[i]}'");
@@ -132,7 +140,8 @@ internal sealed record CommandLineOptions
             OutputPath = outputPath,
             LogPath = logPath,
             Format = format,
-            Type = scanType
+            Type = scanType,
+            IncludeInternal = includeInternal
         };
     }
 
@@ -159,10 +168,11 @@ internal sealed record CommandLineOptions
     private static void PrintUsage()
     {
         const string text = """
-Usage: cppsbom [--root <path>] [--third-party <path>]... [--output <file>] [--log <file>] [--format spdx|cyclonedx] [--type cmake|vs|visualstudio]
+Usage: cppsbom [--root <path>] [--third-party <path>]... [--output <file>] [--log <file>] [--format spdx|cyclonedx] [--type cmake|vs|visualstudio] [--include-internal]
 
   --format spdx|cyclonedx   Output format (default: spdx)
   --type cmake|vs|visualstudio  Scan mode (default: visualstudio)
+  --include-internal        Include internal dependencies in output
 """;
         Console.WriteLine(text);
     }

@@ -186,7 +186,7 @@ internal sealed class CMakeTargetAnalyzer
                 continue;
             }
 
-            if (IsInternal(resolved))
+            if (IsInternal(resolved) && !_options.IncludeInternal)
             {
                 continue;
             }
@@ -213,7 +213,7 @@ internal sealed class CMakeTargetAnalyzer
         {
             var resolved = TryResolveRelative(directive.Value, Path.GetDirectoryName(directive.FilePath)!, projectDir);
             var identifier = resolved is not null ? BuildIdentifierFromPath(resolved) : directive.Value;
-            if (resolved is not null && IsInternal(resolved))
+            if (resolved is not null && IsInternal(resolved) && !_options.IncludeInternal)
             {
                 continue;
             }
@@ -249,6 +249,10 @@ internal sealed class CMakeTargetAnalyzer
                 if (resolved is not null && IsInternal(resolved))
                 {
                     internalOutputs.Add(Path.GetFileName(resolved));
+                    if (!_options.IncludeInternal)
+                    {
+                        continue;
+                    }
                 }
 
                 var identifier = resolved is not null ? BuildIdentifierFromPath(resolved) : Path.GetFileNameWithoutExtension(entry);
@@ -311,7 +315,10 @@ internal sealed class CMakeTargetAnalyzer
             if (resolved is not null && IsInternal(resolved))
             {
                 internalOutputs.Add(Path.GetFileName(resolved));
-                continue;
+                if (!_options.IncludeInternal)
+                {
+                    continue;
+                }
             }
 
             var identifier = resolved is not null ? BuildIdentifierFromPath(resolved) : Path.GetFileNameWithoutExtension(value);

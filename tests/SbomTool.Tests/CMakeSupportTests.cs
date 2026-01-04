@@ -240,7 +240,7 @@ public sealed class CMakeSupportTests
         var graph = scanner.Scan(workspace.Root);
         var target = graph.TargetsById.Values.Single();
 
-        var options = CommandLineOptions.Parse(new[] { "--root", workspace.Root, "--type", "cmake" });
+        var options = CommandLineOptions.Parse(new[] { "--root", workspace.Root, "--type", "cmake", "--include-internal" });
         var analyzer = new CMakeTargetAnalyzer(options, CreateLogger(), new SourceScanner(), new NullComResolver(CreateLogger()), graph);
         var dependencies = analyzer.Analyze(target).ToList();
 
