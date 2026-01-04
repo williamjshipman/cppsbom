@@ -1,13 +1,14 @@
 # Project Context
 
 ## Purpose
-- Command-line tool (cppsbom) that generates SBOMs for C++ codebases by scanning Visual Studio solutions/projects and source files.
+- Command-line tool (cppsbom) that generates SBOMs for C++ codebases by scanning Visual Studio solutions/projects or CMakeLists.txt inputs.
 - Emits SPDX JSON by default and supports CycloneDX JSON via `--format`.
 
 ## Tech Stack
 - C#/.NET CLI (net9.0, nullable enabled, preview features).
 - Serilog (console + rolling file logging) and System.Text.Encoding.CodePages.
 - Output formats: SPDX 2.3 JSON and CycloneDX 1.5 JSON.
+- Tests: xUnit + Microsoft.NET.Test.Sdk (`tests/SbomTool.Tests`).
 
 ## Project Conventions
 
@@ -15,15 +16,16 @@
 - 4-space indentation with file-scoped namespaces (`namespace CppSbom;`).
 - PascalCase for types/methods; camelCase for locals/parameters; prefer `var` when obvious.
 - Nullable reference types enabled.
+- XML doc comments are used on all types and members.
 
 ### Architecture Patterns
 - `Program` handles CLI parsing/logging and runs `SbomGenerator`.
-- `SbomGenerator` orchestrates `SolutionScanner` -> `ProjectAnalyzer` -> `SourceScanner` -> `SbomWriter`.
+- `SbomGenerator` orchestrates `SolutionScanner` -> `ProjectAnalyzer` -> `SourceScanner` -> `SbomWriter` for Visual Studio scans, and `CMakeScanner` -> `CMakeTargetAnalyzer` for CMake scans.
 - OS-specific COM resolution: Windows uses registry; non-Windows uses a null resolver and logs a warning.
 - One logical component per `.cs` file under `src/SbomTool/`.
 
 ### Testing Strategy
-- No test project yet. If tests are added, create `tests/` with a dedicated test project that mirrors the source layout.
+- Tests live in `tests/SbomTool.Tests` and mirror the source layout.
 - Add regression coverage and negative-path tests for new behavior.
 
 ### Git Workflow
@@ -32,6 +34,7 @@
 
 ## Domain Context
 - Scans `.sln` files and `.vcxproj` projects to resolve dependencies from include paths, `#include`, `import`, `#pragma comment(lib, ...)`, and project metadata (AdditionalDependencies/LibraryDirectories).
+- Supports `--type` to select Visual Studio or CMake scanning; scan modes are exclusive.
 - Uses COM registry lookups (ProgID/CLSID) on Windows to capture COM dependencies.
 - `--root` defines internal scope; `--third-party` marks external dependency roots (non-existent paths are ignored).
 - Outputs a dependency summary and project-to-dependency relationships in the SBOM.
